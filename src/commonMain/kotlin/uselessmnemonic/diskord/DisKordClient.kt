@@ -15,7 +15,7 @@ import uselessmnemonic.diskord.rest.entities.user.IUser
 class DisKordClient(val httpClient: HttpClient, val config: DisKordClientConfig) {
 
     // internal objects
-    private val gatewayClient = GatewayClient(httpClient, config)
+    private var gatewayClient = GatewayClient(httpClient, config )
 
     // state locks
     private val connectionMutex = Mutex()
@@ -42,7 +42,7 @@ class DisKordClient(val httpClient: HttpClient, val config: DisKordClientConfig)
         var err: Exception? = null
 
         while (config.reconnectIndefinitely || reconnectCounter-- > 0) try {
-            gatewayClient.tryConnect()
+            gatewayClient = GatewayClient(httpClient.webSocketSession(botRequest))
             connectionState = ConnectionState.CONNECTED
             break
         } catch (ex: Exception) {

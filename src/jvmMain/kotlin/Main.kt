@@ -27,13 +27,13 @@ suspend fun main(args: Array<String>) {
     )
     val diskord = DisKordClient(client, config)
 
-    diskord.messageCreated += ::onMessageUpdated
+    diskord.messageCreated += ::onMessageCreated
     diskord.connect()
 }
 
-suspend fun onMessageUpdated(client: DisKordClient, e: MessageCreateEventArgs) {
+suspend fun onMessageCreated(client: DisKordClient, e: MessageCreateEventArgs) {
     if (e.message.author.id != client.currentUser.id) {
         val msg = e.message.content.trim().lowercase()
-        e.message.respond("${e.author.mention} $msg")
+        //e.message.respond("${e.author.mention} $msg")
     }
 }
