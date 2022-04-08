@@ -5,8 +5,8 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class Payload<E>(
-    @Required var op: Int,
-    @Required var s: Int?,
-    @Required var t: String?,
-    var d: E?
+    var op: Int,
+    var d: E?,
+    var s: Int? = null,
+    var t: String? = null,
 )

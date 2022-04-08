@@ -1,4 +1,4 @@
-package uselessmnemonic.diskord.gateway.rest
+package uselessmnemonic.diskord.rest.requests
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
