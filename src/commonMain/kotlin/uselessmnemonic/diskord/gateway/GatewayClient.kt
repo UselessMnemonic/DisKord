@@ -6,7 +6,7 @@ import io.ktor.client.request.*
 import io.ktor.http.cio.websocket.*
 import io.ktor.util.date.*
 import kotlinx.coroutines.*
-import kotlinx.coroutines.channels.SendChannel
+import kotlinx.coroutines.channels.*
 import kotlinx.coroutines.flow.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -27,9 +27,8 @@ class GatewayClient(val httpClient: HttpClient, val config: DisKordClientConfig)
 
     suspend fun connect(endpoint: String) {
         pendingAcks = 0
-        val setup = config.makeWebsocketRequest()
         session = httpClient.webSocketSession {
-            setup()
+            config.makeWebsocketRequest()()
             url(endpoint)
         }
 
@@ -45,6 +44,12 @@ class GatewayClient(val httpClient: HttpClient, val config: DisKordClientConfig)
             throw IllegalStateException("Gateway opened with opcode ${first.op}")
         }
 
+        val period = json.unwrap<Hello>(first).heartbeatInterval.toLong()
+        val heart = Channel<Unit>()
+        session!!.launch {
+            delay(period)
+            heart.send()
+        }
         session!!.launch {
 
         }
@@ -69,8 +74,7 @@ class GatewayClient(val httpClient: HttpClient, val config: DisKordClientConfig)
     }
 
     private suspend inline fun ClientWebSocketSession.onHello(hello: Hello) {
-        startHeartbeat(hello.heartbeatInterval.toLong())
-        identify()
+        TODO("onHello")
     }
 
     private suspend inline fun ClientWebSocketSession.onHeartbeat() {
@@ -175,12 +179,5 @@ class GatewayClient(val httpClient: HttpClient, val config: DisKordClientConfig)
         }
         send(GatewayOpcodes.IDENTIFY, config.makeIdentity())
         pendingAcks++
-    }
-
-    private suspend inline fun ClientWebSocketSession.startHeartbeat(period: Long) = launch {
-        while (isActive) {
-            delay(period)
-            beatHeart()
-        }
     }
 }
