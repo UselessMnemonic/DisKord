@@ -5,60 +5,65 @@ import io.ktor.client.features.websocket.*
 import io.ktor.client.request.*
 import io.ktor.http.cio.websocket.*
 import io.ktor.util.date.*
+
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.selects.select
+
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
+
 import uselessmnemonic.diskord.DisKordClientConfig
-import uselessmnemonic.diskord.Platform
-import uselessmnemonic.diskord.gateway.exceptions.ZombifiedGatewayException
+import uselessmnemonic.diskord.exceptions.ZombifiedGatewayException
 import uselessmnemonic.diskord.gateway.op.*
 
 class GatewayClient(val httpClient: HttpClient, val config: DisKordClientConfig) {
 
-    private val json = Json { ignoreUnknownKeys = true }
-    private var session: DefaultClientWebSocketSession? = null
-
-    private var sessionId: Int? = null
     private var lastSequence: Int? = null
     private var pendingAcks = 0
 
     suspend fun connect(endpoint: String) {
         pendingAcks = 0
-        session = httpClient.webSocketSession {
-            config.makeWebsocketRequest()()
-            url(endpoint)
+        val session = httpClient.webSocketSession(config.makeWebsocketRequest(endpoint))
+
+        val payloads = Channel<Payload<JsonElement>>(config.messageCacheSize)
+        session.launch {
+            while (isActive) {
+                val frame = session.incoming.receive()
+            }
         }
 
-        val flow = session!!.incoming.receiveAsFlow()
-            .mapNotNull { it as? Frame.Text }
-            .map { it.readText() }
-            .map { json.decodePayload(it) }
-
-        val first = flow.first()
+        val first = packets.receive() as? Frame.Text ?: json.decodePayload()
         if (first.op != GatewayOpcodes.HELLO) {
-            session?.close(CloseReason(CloseReason.Codes.PROTOCOL_ERROR, "unexpected opcode"))
-            session = null
+            session.close(CloseReason(CloseReason.Codes.PROTOCOL_ERROR, "unexpected opcode"))
             throw IllegalStateException("Gateway opened with opcode ${first.op}")
         }
 
-        val period = json.unwrap<Hello>(first).heartbeatInterval.toLong()
+        val period = json.unwrapPayload<Hello>(first).heartbeatInterval.toLong()
         val heart = Channel<Unit>()
-        session!!.launch {
-            delay(period)
-            heart.send()
-        }
-        session!!.launch {
 
+        session.launch {
+            launch {
+                delay(period)
+                heart.send(Unit)
+            }
+            while (isActive) select<Unit> {
+                packets.onReceive {
+                    if (it is Frame.Text) {
+                        session.onPayload(json.decodePayload(it.readText()))
+                    }
+                }
+                heart.onReceive {
+                    session.beatHeart()
+                }
+            }
         }
     }
 
     /* OPERATION HANDLERS */
-    private suspend fun ClientWebSocketSession.onPayload(payload: Payload<JsonElement>) {
+    private suspend fun ClientWebSocketSession.onPayload(payload: Payload<out JsonElement>) {
         when (payload.op) {
-            GatewayOpcodes.HELLO -> onHello(json.unwrap(payload))
+            GatewayOpcodes.HELLO -> onHello(json.unwrapPayload(payload))
             GatewayOpcodes.DISPATCH -> onDispatch(payload)
             GatewayOpcodes.HEARTBEAT -> onHeartbeat()
             //GatewayOpcodes.IDENTIFY -> throw IllegalStateException()
@@ -93,7 +98,7 @@ class GatewayClient(val httpClient: HttpClient, val config: DisKordClientConfig)
         pendingAcks = 0
     }
 
-    private suspend inline fun ClientWebSocketSession.onDispatch(payload: Payload<JsonElement>) {
+    private suspend inline fun ClientWebSocketSession.onDispatch(payload: Payload<out JsonElement>) {
         lastSequence = payload.s!!
         when (payload.t!!) {
             DispatchCodes.READY -> TODO("READY")
@@ -156,7 +161,7 @@ class GatewayClient(val httpClient: HttpClient, val config: DisKordClientConfig)
         }
     }
 
-    private suspend inline fun ClientWebSocketSession.onUnknown(payload: Payload<JsonElement>) {
+    private suspend inline fun ClientWebSocketSession.onUnknown(payload: Payload<out JsonElement>) {
         println("Got: $payload")
     }
 

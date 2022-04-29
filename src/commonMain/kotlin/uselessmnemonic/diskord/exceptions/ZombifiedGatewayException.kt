@@ -1,3 +1,3 @@
-package uselessmnemonic.diskord.gateway.exceptions
+package uselessmnemonic.diskord.exceptions
 
 class ZombifiedGatewayException: RuntimeException()

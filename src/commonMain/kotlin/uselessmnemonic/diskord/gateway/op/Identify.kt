@@ -8,8 +8,8 @@ import uselessmnemonic.diskord.Platform
 data class Identify(
     val token: String,
     val intents: Int,
+    val compress: Boolean,
     val shard: IntArray? = null,
-    val compress: Boolean = false,
     @SerialName("large_threshold")
     val largeThreshold: Int = 50,
     val presence: UpdatePresence? = null,
