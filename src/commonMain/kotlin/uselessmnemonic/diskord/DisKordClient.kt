@@ -22,16 +22,16 @@ class DisKordClient(val httpClient: HttpClient, val config: DisKordClientConfig)
     lateinit var currentUser: IUser; private set
 
     // events
-    val messageCreated: AsyncEvent<MessageCreateEventArgs> = AsyncEvent()
+    // val messageCreated: AsyncEvent<MessageCreateEventArgs> = AsyncEvent()
 
     suspend fun connect() {
         if (!connectionMutex.tryLock()) {
-            throw IllegalStateException("This client is already connecting.")
+            throw IllegalStateException("this client is already connecting")
         }
 
         if (connectionState == ConnectionState.CONNECTED) {
             connectionMutex.unlock()
-            throw IllegalStateException("This client is already connected.")
+            throw IllegalStateException("this client is already connected")
         }
 
         connectionState = ConnectionState.CONNECTING
@@ -50,7 +50,7 @@ class DisKordClient(val httpClient: HttpClient, val config: DisKordClientConfig)
         if (connectionState != ConnectionState.CONNECTED) {
             connectionState = ConnectionState.DISCONNECTED
             connectionMutex.unlock()
-            throw Exception("Could not connect to Discord.", err)
+            throw Exception("could not connect to Discord", err)
         }
 
         connectionMutex.unlock()

@@ -13,7 +13,7 @@ enum class GatewayEncoding(val code: String) {
 
     /**
      * Use ETF to encode payloads.
-     * This requires installing the ETF Ktor Extension.
+     * This is currently unsupported.
      */
-    ETF("etf")
+    //ETF("etf")
 }
