@@ -1,14 +1,20 @@
 package uselessmnemonic.diskord
 
 import io.ktor.client.*
+import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.BroadcastChannel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
-import uselessmnemonic.diskord.events.AsyncEvent
-import uselessmnemonic.diskord.events.MessageCreateEventArgs
 import uselessmnemonic.diskord.gateway.GatewayClient
 import uselessmnemonic.diskord.rest.RestClient
-import uselessmnemonic.diskord.rest.entities.user.IUser
 
-class DisKordClient(val httpClient: HttpClient, val config: DisKordClientConfig) {
+class DisKordClient(httpClient: HttpClient, val config: DisKordClientConfig): CoroutineScope {
+
+    // coroutine scope for this client
+    private val clientScope = CoroutineScope(Dispatchers.Default)
+    override val coroutineContext = clientScope.coroutineContext
 
     // internal clients
     private var gatewayClient = GatewayClient(httpClient, config)
@@ -19,11 +25,18 @@ class DisKordClient(val httpClient: HttpClient, val config: DisKordClientConfig)
 
     // running state
     var connectionState = ConnectionState.DISCONNECTED; private set
-    lateinit var currentUser: IUser; private set
+    // lateinit var currentUser: IUser; private set
 
-    // events
-    // val messageCreated: AsyncEvent<MessageCreateEventArgs> = AsyncEvent()
+    // event flows
+    private val _messageCreated = MutableSharedFlow<Nothing>()
+    val messageCreated = _messageCreated as SharedFlow<Nothing>
 
+    /**
+     * Connects the client to Discord.
+     * Upon success, a handshake process begins to start or resume the bot session.
+     * If the connection fails, or too many attempts are made, an exception is thrown.
+     * @throws Exception
+     */
     suspend fun connect() {
         if (!connectionMutex.tryLock()) {
             throw IllegalStateException("this client is already connecting")

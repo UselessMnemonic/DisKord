@@ -8,8 +8,6 @@ import kotlinx.coroutines.withContext
 import uselessmnemonic.diskord.DisKordClient
 import uselessmnemonic.diskord.DisKordClientConfig
 import uselessmnemonic.diskord.TokenType
-import uselessmnemonic.diskord.events.MessageCreateEventArgs
-import uselessmnemonic.diskord.gateway.GatewayClient
 import uselessmnemonic.diskord.gateway.GatewayIntents
 import java.io.FileReader
 
@@ -36,16 +34,9 @@ suspend fun main(args: Array<String>) {
     )
     val diskord = DisKordClient(client, config)
 
-    diskord.messageCreated += ::onMessageCreated
+    //diskord.messageCreated += ::onMessageCreated
     diskord.connect()
 
     println("Connected!")
     awaitCancellation()
-}
-
-suspend fun onMessageCreated(client: DisKordClient, e: MessageCreateEventArgs) {
-    /*if (e.message.author.id != client.currentUser.id) {
-        val msg = e.message.content.trim().lowercase()
-        //e.message.respond("${e.author.mention} $msg")
-    }*/
 }

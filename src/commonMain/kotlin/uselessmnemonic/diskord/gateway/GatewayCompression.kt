@@ -10,13 +10,13 @@ enum class GatewayCompression {
      * Only JSON-encoded payloads are compressible. No payload shares
      * a compression context.
      */
-    PAYLOAD,
+    //PAYLOAD,
 
     /**
      * Enables transport compression for the connection to the gateway.
      * All payloads share a compression context.
      */
-    TRANSPORT,
+    //TRANSPORT,
 
     /**
      * Disables payload compression.

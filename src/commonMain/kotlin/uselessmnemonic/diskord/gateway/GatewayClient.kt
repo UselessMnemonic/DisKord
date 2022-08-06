@@ -2,16 +2,15 @@ package uselessmnemonic.diskord.gateway
 
 import io.ktor.client.*
 import io.ktor.client.features.websocket.*
-import io.ktor.client.request.*
 import io.ktor.http.cio.websocket.*
-import io.ktor.util.date.*
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.*
-import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.selects.select
 
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 
 import uselessmnemonic.diskord.DisKordClientConfig
 import uselessmnemonic.diskord.exceptions.ZombifiedGatewayException
@@ -19,52 +18,48 @@ import uselessmnemonic.diskord.gateway.op.*
 
 class GatewayClient(val httpClient: HttpClient, val config: DisKordClientConfig) {
 
+    private val json = Json {
+        ignoreUnknownKeys = true
+    }
     private var lastSequence: Int? = null
     private var pendingAcks = 0
 
+    private val _events = Channel<Nothing>()
+    public val events: ReceiveChannel<Nothing> = _events
+
+    suspend fun ClientWebSocketSession.closeWithError(code: CloseReason.Codes, msg: String): Nothing {
+        close(CloseReason(code, msg))
+        throw IllegalStateException(msg)
+    }
+
     suspend fun connect(endpoint: String) {
-        pendingAcks = 0
-        val session = httpClient.webSocketSession(config.makeWebsocketRequest(endpoint))
+        val requestBuilder = config.newWebsocketRequest(endpoint)
+        val session = httpClient.webSocketSession(requestBuilder)
 
-        val payloads = Channel<Payload<JsonElement>>(config.messageCacheSize)
-        session.launch {
-            while (isActive) {
-                val frame = session.incoming.receive()
-            }
-        }
+        // take incoming packets as payloads
+        val packets = session.producePayloads()
 
-        val first = packets.receive() as? Frame.Text ?: json.decodePayload()
+        // perform handshake
+        val first = packets.receive()
         if (first.op != GatewayOpcodes.HELLO) {
-            session.close(CloseReason(CloseReason.Codes.PROTOCOL_ERROR, "unexpected opcode"))
-            throw IllegalStateException("Gateway opened with opcode ${first.op}")
+            session.closeWithError(CloseReason.Codes.PROTOCOL_ERROR, "first gateway opcode was ${first.op}")
         }
 
-        val period = json.unwrapPayload<Hello>(first).heartbeatInterval.toLong()
-        val heart = Channel<Unit>()
+        // TODO resume
 
-        session.launch {
-            launch {
-                delay(period)
-                heart.send(Unit)
-            }
-            while (isActive) select<Unit> {
-                packets.onReceive {
-                    if (it is Frame.Text) {
-                        session.onPayload(json.decodePayload(it.readText()))
-                    }
-                }
-                heart.onReceive {
-                    session.beatHeart()
-                }
-            }
-        }
+        // create heartbeat
+        val period = json.unwrapPayload<Hello>(first).heartbeatInterval
+        val heartbeat = session.produceHeartbeat(period.toLong())
+
+        // pass events
+        session.processEvents(packets, heartbeat)
     }
 
     /* OPERATION HANDLERS */
-    private suspend fun ClientWebSocketSession.onPayload(payload: Payload<out JsonElement>) {
-        when (payload.op) {
-            GatewayOpcodes.HELLO -> onHello(json.unwrapPayload(payload))
-            GatewayOpcodes.DISPATCH -> onDispatch(payload)
+    private inline fun WebSocketSession.onPacket(packet: Payload<JsonElement>) {
+        when (packet.op) {
+            GatewayOpcodes.HELLO -> onHello(json.unwrapPayload(packet))
+            GatewayOpcodes.DISPATCH -> onDispatch(packet)
             GatewayOpcodes.HEARTBEAT -> onHeartbeat()
             //GatewayOpcodes.IDENTIFY -> throw IllegalStateException()
             //GatewayOpcodes.PRESENCE_UPDATE -> throw IllegalStateException()
@@ -74,31 +69,31 @@ class GatewayClient(val httpClient: HttpClient, val config: DisKordClientConfig)
             //GatewayOpcodes.REQUEST_GUILD_MEMBERS -> throw IllegalStateException()
             GatewayOpcodes.INVALID_SESSION -> onInvalidSession()
             GatewayOpcodes.HEARTBEAT_ACK -> onHeartbeatAck()
-            else -> onUnknown(payload)
+            else -> println("Got: $packet")
         }
     }
 
-    private suspend inline fun ClientWebSocketSession.onHello(hello: Hello) {
+    private inline fun WebSocketSession.onHello(hello: Hello) {
         TODO("onHello")
     }
 
-    private suspend inline fun ClientWebSocketSession.onHeartbeat() {
+    private inline fun WebSocketSession.onHeartbeat() {
         TODO("onHeartbeat")
     }
 
-    private suspend inline fun ClientWebSocketSession.onReconnect() {
+    private inline fun WebSocketSession.onReconnect() {
         TODO("onReconnect")
     }
 
-    private suspend inline fun ClientWebSocketSession.onInvalidSession() {
+    private inline fun WebSocketSession.onInvalidSession() {
         TODO("onInvalidSession")
     }
 
-    private suspend inline fun ClientWebSocketSession.onHeartbeatAck() {
+    private inline fun WebSocketSession.onHeartbeatAck() {
         pendingAcks = 0
     }
 
-    private suspend inline fun ClientWebSocketSession.onDispatch(payload: Payload<out JsonElement>) {
+    private inline fun WebSocketSession.onDispatch(payload: Payload<out JsonElement>) {
         lastSequence = payload.s!!
         when (payload.t!!) {
             DispatchCodes.READY -> TODO("READY")
@@ -157,18 +152,58 @@ class GatewayClient(val httpClient: HttpClient, val config: DisKordClientConfig)
             DispatchCodes.VOICE_STATE_UPDATE -> TODO("VOICE_STATE_UPDATE")
             DispatchCodes.VOICE_SERVER_UPDATE -> TODO("VOICE_SERVER_UPDATE")
             DispatchCodes.WEBHOOKS_UPDATE -> TODO("WEBHOOKS_UPDATE")
-            else -> onUnknown(payload)
+            else -> println("Got: $payload")
         }
-    }
-
-    private suspend inline fun ClientWebSocketSession.onUnknown(payload: Payload<out JsonElement>) {
-        println("Got: $payload")
     }
 
     /* DISPATCH HANDLERS */
 
     /* SESSION HELPERS */
-    private suspend inline fun <reified T> ClientWebSocketSession.send(op: Int, data: T) {
+
+    /**
+     * Creates a channel that produces Payloads from incoming text frames.
+     * Should be called once for each session.
+     * @receiver A WebSocketSession connected to a gatewaty.
+     * @return A Channel<Payload>
+     */
+    private fun WebSocketSession.producePayloads() = produce {
+        for (packet in incoming) if (packet is Frame.Text) {
+            val text = packet.readText()
+            val payload = json.decodePayload(text)
+            send(payload)
+        }
+    }
+
+    /**
+     * Launches a ticker channel that produces heartbeat events.
+     * Should be called once for each session.
+     * @receiver A WebSocketSession connected to a gateway.
+     * @returns A Channel<Nothing?> representing the internal heartbeat.
+     */
+    private fun WebSocketSession.produceHeartbeat(period: Long) = produce {
+        while (isActive) {
+            delay(period)
+            send(null)
+        }
+    }
+
+    /**
+     * Launches a producer that funnels gateway events to the main event source.
+     * @receiver A WebSocketSession that produces events.
+     * @return A
+     */
+    private fun WebSocketSession.processEvents(packets: ReceiveChannel<Payload<JsonElement>>, heartbeat: ReceiveChannel<Nothing?>) = launch {
+        while (isActive) select<Unit> {
+            packets.onReceive {
+                this@processEvents.onPacket(it)
+            }
+            heartbeat.onReceive {
+                this@processEvents.doHeartbeat()
+            }
+        }
+    }
+
+    private suspend inline fun <reified T> WebSocketSession.send(op: Int, data: T) {
         val payload = Payload(op, data)
         println("Sending: $payload")
         send(json.encodeToString(payload))
@@ -178,7 +213,7 @@ class GatewayClient(val httpClient: HttpClient, val config: DisKordClientConfig)
         send(GatewayOpcodes.IDENTIFY, config.makeIdentity())
     }
 
-    private suspend inline fun ClientWebSocketSession.beatHeart() {
+    private suspend inline fun WebSocketSession.doHeartbeat() {
         if (pendingAcks > 5) {
             throw ZombifiedGatewayException()
         }

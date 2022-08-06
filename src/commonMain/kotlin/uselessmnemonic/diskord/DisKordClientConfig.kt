@@ -23,19 +23,19 @@ data class DisKordClientConfig (
         append(HttpHeaders.Authorization, "${tokenType.prefix} $token")
     }
 
-    fun makeWebsocketRequest(ep: String): HttpRequestBuilder.() -> Unit = {
+    fun newWebsocketRequest(ep: String): HttpRequestBuilder.() -> Unit = {
         headers(makeAuthHeaders())
         parameter("v", ApiLevel.V9.code)
         parameter("encoding", encoding.code)
-        if (compression == GatewayCompression.TRANSPORT) {
+        /*if (compression == GatewayCompression.TRANSPORT) {
             header("compress", "zlib-stream")
-        }
+        }*/
         url(ep)
     }
 
     fun makeIdentity() = Identify(
         token,
         intents,
-        (compression == GatewayCompression.PAYLOAD)
+        false //(compression == GatewayCompression.PAYLOAD)
     )
 }
