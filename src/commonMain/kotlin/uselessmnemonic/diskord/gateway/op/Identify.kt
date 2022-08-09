@@ -41,10 +41,14 @@ data class Identify(
         )) : this(
         token,
         intents,
-        intArrayOf(shardId, numShards),
         compress,
+        intArrayOf(shardId, numShards),
         largeThreshold,
         presence,
         properties
     )
+
+    override fun toString(): String {
+        return "Identify(intents=$intents, compress=$compress, shard=$shard, largeThreshold=$largeThreshold, presence=$presence, properties=$properties)"
+    }
 }

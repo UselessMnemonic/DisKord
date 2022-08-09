@@ -1,10 +1,9 @@
 package uselessmnemonic.diskord.gateway.op
 
-import kotlinx.serialization.Required
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class Payload<E>(
+data class Packet<E>(
     val op: Int,
     val d: E?,
     val s: Int? = null,

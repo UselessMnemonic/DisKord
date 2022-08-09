@@ -5,20 +5,20 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.BroadcastChannel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.channels.consume
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import uselessmnemonic.diskord.gateway.GatewayClient
 import uselessmnemonic.diskord.rest.RestClient
+import kotlin.coroutines.CoroutineContext
 
 class DisKordClient(httpClient: HttpClient, val config: DisKordClientConfig): CoroutineScope {
 
-    // coroutine scope for this client
-    private val clientScope = CoroutineScope(Dispatchers.Default)
-    override val coroutineContext = clientScope.coroutineContext
+    override val coroutineContext: CoroutineContext = httpClient.coroutineContext + Job()
 
     // internal clients
-    private var gatewayClient = GatewayClient(httpClient, config)
-    private var restClient = RestClient(httpClient, config)
+    private var gateway = GatewayClient(httpClient, config)
+    private var rest = RestClient(httpClient, config)
 
     // state locks
     private val connectionMutex = Mutex()
@@ -27,9 +27,19 @@ class DisKordClient(httpClient: HttpClient, val config: DisKordClientConfig): Co
     var connectionState = ConnectionState.DISCONNECTED; private set
     // lateinit var currentUser: IUser; private set
 
-    // event flows
-    private val _messageCreated = MutableSharedFlow<Nothing>()
-    val messageCreated = _messageCreated as SharedFlow<Nothing>
+    // events
+    private val eventJob: Job
+    private val eventSource = MutableSharedFlow<String>()
+    val events = eventSource.asSharedFlow()
+
+    init {
+        eventJob = httpClient.launch {
+            while (isActive) {
+                val e = gateway.events.receive()
+                eventSource.emit(e)
+            }
+        }
+    }
 
     /**
      * Connects the client to Discord.
@@ -38,22 +48,21 @@ class DisKordClient(httpClient: HttpClient, val config: DisKordClientConfig): Co
      * @throws Exception
      */
     suspend fun connect() {
-        if (!connectionMutex.tryLock()) {
-            throw IllegalStateException("this client is already connecting")
+        if (connectionState == ConnectionState.CONNECTED) {
+            throw IllegalStateException("this client is already connected")
         }
 
-        if (connectionState == ConnectionState.CONNECTED) {
-            connectionMutex.unlock()
-            throw IllegalStateException("this client is already connected")
+        if (!connectionMutex.tryLock()) {
+            throw IllegalStateException("this client is already connecting")
         }
 
         connectionState = ConnectionState.CONNECTING
         var reconnectCounter = config.reconnectAttempts
         var err: Exception? = null
 
-        val gateway = restClient.getGatewayBot()
+        val gateway = rest.getGatewayBot()
         while (config.reconnectIndefinitely || reconnectCounter-- > 0) try {
-            gatewayClient.connect(gateway.url)
+            this.gateway.connect(gateway.url)
             connectionState = ConnectionState.CONNECTED
             break
         } catch (ex: Exception) {

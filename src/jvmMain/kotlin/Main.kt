@@ -1,42 +1,50 @@
 import io.ktor.client.*
 import io.ktor.client.features.json.*
 import io.ktor.client.features.websocket.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onSubscription
+import kotlinx.coroutines.flow.subscribe
 import uselessmnemonic.diskord.DisKordClient
 import uselessmnemonic.diskord.DisKordClientConfig
 import uselessmnemonic.diskord.TokenType
 import uselessmnemonic.diskord.gateway.GatewayIntents
 import java.io.FileReader
 
-suspend fun main(args: Array<String>) {
+fun main(args: Array<String>) {
 
-    val client = HttpClient {
+    System.getProperties().load(FileReader("env.properties"))
+    val botToken: String? = System.getProperty("token")
+
+    if (botToken == null) {
+        throw Exception("no token specified in environment")
+    }
+
+    val http = HttpClient {
         install(JsonFeature)
         install(WebSockets)
     }
 
-    val botToken: String = withContext(Dispatchers.IO) {
-        System.getProperties().load(FileReader("env.properties"))
-        System.getProperty("token")
-    }
-
-    val config = DisKordClientConfig(
+    val config = DisKordClientConfig (
         tokenType = TokenType.BOT,
         token = botToken,
-        reconnectAttempts = 1,
+        reconnectAttempts = 5,
         intents = GatewayIntents.allOf(
             GatewayIntents.GUILDS,
             GatewayIntents.GUILD_MESSAGES
         )
     )
-    val diskord = DisKordClient(client, config)
 
-    //diskord.messageCreated += ::onMessageCreated
-    diskord.connect()
+    val diskord = DisKordClient(http, config)
 
-    println("Connected!")
-    awaitCancellation()
+    /** Note on design principles
+     * The Discord client lives for as long as the HttpClient. If the HttpClient is shut down,
+     * all coroutines launched by the Discord client ought to shut down as well. However, if the
+     * Discord client is shut down, then the HttpClient must not fail
+     */
+    diskord.launch {
+        diskord.connect()
+        println("Connected!")
+    }
 }
